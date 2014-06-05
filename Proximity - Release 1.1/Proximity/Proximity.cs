@@ -8,10 +8,6 @@ namespace Proximity
     class Proximity : PartModule
     {
         private static Rect windowPos = new Rect();
-        
-        // these determine the rate at which the beep pitch and the frequency of beeps varies with height/speed
-        private static int[] heightArray = {15, 25, 50, 75, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2001, 3000, 4000, 5000, 7500, 10001};
-        private static int[] velocityArray = {3, 5, 8, 12, 16, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 120, 150, 175, 200, 250, 10000};
 
         // beep characteristics
         private static string[] beepType = { "Square", "Saw", "Sine", "No audio" };
@@ -29,17 +25,10 @@ namespace Proximity
 
         // expand window
         private static string strshowsettings = "Show settings";
-        bool showsettings = false;
+        private static bool showsettings = false;
 
-        // debugging - raesons for not showing window
-        public enum eReasonNotDrawn {AlwaysShow, DrawnOK, PreLaunch, NotActiveVessel, NotPrimary, AltitudeRange, TimedoutAndStatic,
-            Timewarp, NotFlyingOrPrelaunch, FlyingNoAlt, GamePaused};
-
-        // height type
-        public enum eHeightType {NotDefined, Min, Max, TerrainFn, FlightGlobalAlt };
-
-        private int ActivationHeight = 2000;
-        private int DSThreshold = 200;
+        private static int ActivationHeight = 3000;
+        private static int DSThreshold = 300;
 
         private int altitude = 0;
 
@@ -61,7 +50,7 @@ namespace Proximity
         public float frequency = 280;
         private AudioClip beep;
         private GameObject obj;
-        private int beepLength = 4;
+        private static int beepLength = 3;
 
         // gives 5 second delay before deactivating after landing
         double timeSinceLanding = 0;
@@ -74,10 +63,9 @@ namespace Proximity
         {
             if (state != StartState.Editor)
             {
-                // add this plugin to draw queue
+                //print("@@@OnStart");
                 RenderingManager.AddToPostDrawQueue(0, OnDraw);
 
-                // set up audio thingy
                 sampleRate = AudioSettings.outputSampleRate;
                 obj = new GameObject();
                 obj.AddComponent("AudioSource");
@@ -106,7 +94,6 @@ namespace Proximity
             {
                 case 0:
                     actfrequency = frequency + (velocity * 15f);
-                    //print("velocity = " + velocity.ToString() + ", frequency = " + actfrequency);
                     break;
                 case 1:
                     actfrequency = 440;
@@ -160,6 +147,7 @@ namespace Proximity
 
         public override void OnSave(ConfigNode node)
         {
+            //print("@@@OnSave");
             PluginConfiguration config = PluginConfiguration.CreateForType<Proximity>();
 
             config.SetValue("Window Position", windowPos);
@@ -178,6 +166,7 @@ namespace Proximity
 
         public override void OnLoad(ConfigNode node)
         {
+            //print("@@@OnLoad");
             PluginConfiguration config = PluginConfiguration.CreateForType<Proximity>();
 
             config.load();
@@ -220,44 +209,35 @@ namespace Proximity
 
         private void OnDraw()
         {
+            //print("@@@OnDraw");
             if (vessel != null)
             {
-                eHeightType ht;
-                altitude = GetAltitude(out ht);
+                altitude = GetAltitude();
+                //print("@@@Altitude = " + altitude.ToString());
 
-                eReasonNotDrawn reason;
-                if (RightConditionsToDraw(altitude, out reason))
+                if (RightConditionsToDraw(altitude))
                 {
-                    //DebugHeightPrintout(reason);
-
                     if (sizechange)
                     {
                         windowPos.yMax = windowPos.yMin + 20;
                         sizechange = false;
                     }
-                    windowPos = GUILayout.Window(10, windowPos, OnWindow, "Proximity");
+
+                    //print("@@@OnDraw - calling OnWindow");
+                    windowPos = GUILayout.Window(this.ClassID, windowPos, OnWindow, "Proximity");
 
                     if (windowPos.x == 0 && windowPos.y == 0)
                     {
                         windowPos = windowPos.CentreScreen();
                     }
                 }
-                else 
-                {
-                    //DebugHeightPrintout(reason);
-                }
             }
         }
 
-        public override void OnUpdate()
+        private int GetAltitude()
         {
-        }
-
-        private int GetAltitude(out eHeightType ht)
-        {
+            //print("@@@GetAltitude");
             float distance;
-
-            ht = eHeightType.NotDefined;
 
             // who knows what all the different XaltitudeY methods and fields are supposed to be, but many have unexpected values 
             // in certain situations. These seem to all be appropriate to the situation.
@@ -266,89 +246,83 @@ namespace Proximity
                 if (FlightGlobals.ActiveVessel.heightFromTerrain >= 0)
                 {
                     distance = Mathf.Min(FlightGlobals.ActiveVessel.heightFromTerrain, (float)FlightGlobals.ActiveVessel.altitude);
-                    ht = eHeightType.Min;
                 }
                 else 
                 {
                     distance = Convert.ToInt32(FlightGlobals.ActiveVessel.altitude);
-                    ht = eHeightType.FlightGlobalAlt;
                 }
             }
             else 
             {
                 distance = Mathf.Max(vessel.GetHeightFromTerrain(), FlightGlobals.ActiveVessel.heightFromTerrain);
-                ht = eHeightType.Max;
             }
             return Convert.ToInt32(distance);
         }
 
-        private bool RightConditionsToDraw(int alt, out eReasonNotDrawn reason)
+        private bool RightConditionsToDraw(int alt)
         {
-            bool retval = true;
-            reason = eReasonNotDrawn.DrawnOK;
-
+            //print("@@@RightConditionsToDraw");
             // ignore if not this vessel
             if (this.vessel != FlightGlobals.ActiveVessel)
             {
-                retval = false;
-                reason = eReasonNotDrawn.NotActiveVessel;
+                //print("@@@Not processing - Not active vessel");
+                return false;
             }
             // ignore all but one if there are multiple parts on same vessel
             else if (!this.part.IsPrimary(this.vessel.parts, this.ClassID))
             {
-                retval = false;
-                reason = eReasonNotDrawn.NotPrimary;
+                //print("@@@Not processing - multiple part, clsID = " + this.ClassID);
+                return false;
             }
             // alwaysShow cancels any further checks - once we know the vessel is active and the part is primary
             else if (alwaysShow)
             {
-                reason = eReasonNotDrawn.AlwaysShow;
                 return true;
             }
             // switch off 5 seconds after landing
             else if (timeSinceLanding + 5.0 < vessel.missionTime && (Mathf.Abs(Convert.ToInt32(vessel.verticalSpeed)) < 1))
             {
-                retval = false;
-                reason = eReasonNotDrawn.TimedoutAndStatic;
+                //print("@@@Not processing - Landed");
+                return false;
             }
             // switch off if timewarp on
             else if (TimeWarp.CurrentRateIndex != 0)
             {
-                retval = false;
-                reason = eReasonNotDrawn.Timewarp;
+                //print("@@@Not processing - Timewarp");
+                return false;
             }
             // switch off if not SUB_ORBITAL or FLYING (5 second grace period)
             else if (!(timeSinceLanding + 5.0 > vessel.missionTime || vessel.situation == Vessel.Situations.FLYING ||
                     vessel.situation == Vessel.Situations.SUB_ORBITAL))
             {
-                retval = false;
-                reason = eReasonNotDrawn.NotFlyingOrPrelaunch;
+                //print("@@@Not processing - Not flying or suborbital");
+                return false;
             }
             // because timeSinceLanding hasn't been set yet
             else if (vessel.situation == Vessel.Situations.PRELAUNCH)
             {
-                retval = false;
-                reason = eReasonNotDrawn.PreLaunch;
+                //print("@@@Not processing - prelaunch");
+                return false;
             }
             // ignore if not within (ActivationHeight) of surface
             else if (alt > ActivationHeight || alt < 1)
             {
-                retval = false;
-                reason = eReasonNotDrawn.AltitudeRange;
+                //print("@@@Not processing - Not in alt range");
+                return false;
             }
             // don't display / beep if game paused
             else if (FlightDriver.Pause || PauseMenu.isOpen)
             {
-                retval = false;
-                reason = eReasonNotDrawn.GamePaused;
+                //print("@@@Not processing - paused");
+                return false;
             }
             
-            return retval;
+            return true;
          }
-
-        private void DebugHeightPrintout(eReasonNotDrawn reason)
+/*
+        private void DebugHeightPrintout()
         {
-            print("sit: " + vessel.situation.ToString() + ", drawStatus: " + reason.ToString() + ", GetAltitude() = " + altitude.ToString() +
+            print("sit: " + vessel.situation.ToString() + ", GetAltitude() = " + altitude.ToString() +
                 ", GetHeightFromSurface() = " + vessel.GetHeightFromSurface().ToString() +
                 ", heightFromSurface = " + vessel.heightFromSurface +
                 ", heightFromTerrain = " + vessel.heightFromTerrain +
@@ -358,38 +332,17 @@ namespace Proximity
                 ", FlightGlobals.ship_altitude = " + FlightGlobals.ship_altitude
                 );
         }
-
+*/
         private void OnWindow(int windowID)
         {
-            DoWindow();
-        }
-
-        private void DoWindow()
-        {
-            eHeightType ht;
-            altitude = GetAltitude(out ht);
-
-            eReasonNotDrawn reason;
-            if (RightConditionsToDraw(altitude, out reason))
-            {
-                //print(ht.ToString());
-                DoProximityContent();
-            }
-            else
-            {
-                //print(reason.ToString() + ", " + ht.ToString());
-            }
-
+            //print("@@@OnWindow");
+            DoProximityContent();
             GUI.DragWindow();
         }
 
         private void DoProximityContent()
         {
-            // gives 5 second delay before deactivating after landing
-            if (!vessel.LandedOrSplashed)
-            {
-                timeSinceLanding = vessel.missionTime;
-            }
+            CheckLanded();
 
             Color colour = GetColour(altitude);
 
@@ -444,6 +397,15 @@ namespace Proximity
             return altitude * ActivationHeight * 15 / (ActivationHeight * ActivationHeight);
         }
 
+        private void CheckLanded()
+        {
+            // gives 5 second delay before deactivating after landing
+            if (!vessel.LandedOrSplashed)
+            {
+                timeSinceLanding = vessel.missionTime;
+            }
+        }
+/*
         private void ShowSituation(int alt)
         { 
             // debugging - ship situation and actual altitude above terrain
@@ -458,17 +420,8 @@ namespace Proximity
             styleValue = new GUIStyle(GUI.skin.textArea);
             styleValue.normal.textColor = styleValue.focused.textColor = styleValue.hover.textColor = styleValue.active.textColor = Color.green;
             styleValue.alignment = TextAnchor.MiddleCenter;
-/*
-            double latitude = vessel.latitude % 360;
-            double longitude = vessel.longitude % 360;
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("lat:" + latitude.ToString("F4"), styleValue);
-            GUILayout.Label("long:" + longitude.ToString("F4"), styleValue);
-            GUILayout.EndHorizontal();
- */ 
         }
-
+*/
         // colour for visual display bar - cyan if distance mode, else by prox / speed ratio
         private Color GetColour(int alt)
         { 
@@ -513,7 +466,6 @@ namespace Proximity
             if (showsettings)
             {
                 // Activation height
-
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("Activation height: ");
                 GUILayout.EndHorizontal();
@@ -542,7 +494,6 @@ namespace Proximity
                 GUILayout.EndHorizontal();
 
                 // Visual type
-
                 GUILayout.BeginHorizontal();
                 string cap = "Visual: " + visualType[visualIndex];
                 cap = cap.Replace("%", DSThreshold.ToString());
@@ -561,7 +512,6 @@ namespace Proximity
                 GUILayout.EndHorizontal();
 
                 // Visual threshold subtype
-
                 if (visualIndex == 2)
                 { 
                     GUILayout.BeginHorizontal();
@@ -624,7 +574,6 @@ namespace Proximity
                 GUILayout.EndHorizontal();
 
                 // beep length
-
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("Beep length (1-20): ");
                 GUILayout.EndHorizontal();
@@ -667,7 +616,6 @@ namespace Proximity
         { 
             string warn = warnstring;
             warn = warn.Insert(warnPos, "O");
-            //warn = warn.Insert(warnstring.Length - (warnPos + 1), "O");
             warn = warn.Insert(warnstring.Length - warnPos, "O");
 
             if (vessel.verticalSpeed <= 0) // falling
